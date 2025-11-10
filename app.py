@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import io
-import base64
 from datetime import datetime
 from itertools import combinations
 from collections import deque
@@ -18,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS moderne avec dark/light mode
+# CSS moderne avec dark/light mode et signature
 st.markdown("""
 <style>
     .main-header {
@@ -54,6 +53,14 @@ st.markdown("""
         border-radius: 50%;
         margin-right: 8px;
         border: 1px solid #ccc;
+    }
+    .footer {
+        text-align: center;
+        margin-top: 3rem;
+        padding: 1rem;
+        border-top: 1px solid #ddd;
+        color: #666;
+        font-size: 0.9rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -130,18 +137,6 @@ class KarateApp:
             st.session_state.graph = st.session_state.history[st.session_state.history_index].copy()
             st.rerun()
     
-    def redo(self):
-        """Avance dans l'historique - annule un retour (retour à l'état avant le retour)"""
-        if st.session_state.history_index < len(st.session_state.history) - 1:
-            st.session_state.history_index += 1
-            st.session_state.graph = st.session_state.history[st.session_state.history_index].copy()
-            st.rerun()
-    
-    def get_group_display_name(self, group_name):
-        """Retourne le nom du groupe avec un cercle de couleur"""
-        color = st.session_state.groups.get(group_name, "#cccccc")
-        return f"<span class='group-color' style='background-color: {color};'></span>{group_name}"
-    
     def run(self):
         # Navigation entre pages
         page = st.sidebar.selectbox("📄 Navigation", 
@@ -151,6 +146,13 @@ class KarateApp:
             self.main_page()
         else:
             self.analytics_page()
+        
+        # Signature dans le footer
+        st.markdown("""
+        <div class="footer">
+            Développé par Yasmine Aidoud - M2 ASD GRP 1
+        </div>
+        """, unsafe_allow_html=True)
     
     def main_page(self):
         """Page principale de visualisation"""
@@ -173,22 +175,10 @@ class KarateApp:
         with st.sidebar:
             st.header("🎮 Contrôles du Réseau")
             
-            # Navigation historique
+            # Navigation historique - SEULEMENT RETOUR
             st.subheader("⏪ Historique")
-            col_undo, col_redo = st.columns(2)
-            with col_undo:
-                undo_disabled = st.session_state.history_index == 0
-                if st.button("⏪ Retour", disabled=undo_disabled):
-                    self.undo()
-            
-            with col_redo:
-                # CORRECTION : Le bouton Avancer est activé si on n'est pas au dernier état
-                # (c'est-à-dire si on a fait au moins un Retour)
-                redo_disabled = st.session_state.history_index >= len(st.session_state.history) - 1
-                if st.button("⏩ Avancer", disabled=redo_disabled):
-                    self.redo()
-            
-            # Indicateur d'état historique
+            if st.button("⏪ Retour", disabled=st.session_state.history_index == 0):
+                self.undo()
             st.caption(f"État {st.session_state.history_index + 1}/{len(st.session_state.history)}")
             
             # Gestion des groupes - FLEXIBLE
@@ -836,78 +826,87 @@ class KarateApp:
     
     def export_all_csv(self):
         """Exporte tous les CSV dans un ZIP"""
-        metrics = self.calculate_all_metrics()
-        
-        # Création de tous les DataFrames
-        centrality_df = pd.DataFrame({
-            "Sommet": metrics["nodes"],
-            "Degré": [metrics["degree_centrality"][v] for v in metrics["nodes"]],
-            "Proximité": [metrics["closeness_dict"][v] for v in metrics["nodes"]],
-            "Intermédiarité": [metrics["betweenness_dict"][v] for v in metrics["nodes"]],
-            "Authority": [metrics["authority_dict"][v] for v in metrics["nodes"]],
-            "Hub": [metrics["hub_dict"][v] for v in metrics["nodes"]],
-        })
-        
-        clustering_df = pd.DataFrame({
-            "Sommet": metrics["nodes"],
-            "Clustering": [metrics["clustering_dict"][v] for v in metrics["nodes"]],
-            "Degré": [metrics["degree_dict"][v] for v in metrics["nodes"]]
-        })
-        
-        kcore_df = pd.DataFrame({
-            "Sommet": metrics["nodes"],
-            "K-core": [metrics["core_numbers"][v] for v in metrics["nodes"]],
-            "Degré": [metrics["degree_dict"][v] for v in metrics["nodes"]]
-        })
-        
-        cliques_df = pd.DataFrame({
-            "Clique": [', '.join(map(str, sorted(c))) for c in metrics["cliques"]],
-            "Taille": [len(c) for c in metrics["cliques"]]
-        })
-        
-        # Données des nœuds et arêtes
-        nodes_data = []
-        for node in st.session_state.graph.nodes():
-            nodes_data.append({
-                'Nœud': node,
-                'Groupe': st.session_state.graph.nodes[node].get('group', 'Non assigné'),
-                'Degré': st.session_state.graph.degree(node)
+        try:
+            metrics = self.calculate_all_metrics()
+            
+            # Création de tous les DataFrames
+            centrality_df = pd.DataFrame({
+                "Sommet": metrics["nodes"],
+                "Degré": [metrics["degree_centrality"][v] for v in metrics["nodes"]],
+                "Proximité": [metrics["closeness_dict"][v] for v in metrics["nodes"]],
+                "Intermédiarité": [metrics["betweenness_dict"][v] for v in metrics["nodes"]],
+                "Authority": [metrics["authority_dict"][v] for v in metrics["nodes"]],
+                "Hub": [metrics["hub_dict"][v] for v in metrics["nodes"]],
             })
-        nodes_df = pd.DataFrame(nodes_data)
-        
-        edges_data = []
-        for edge in st.session_state.graph.edges():
-            edges_data.append({'Source': edge[0], 'Cible': edge[1]})
-        edges_df = pd.DataFrame(edges_data)
-        
-        # Matrice d'adjacence
-        nodes_sorted = sorted(st.session_state.graph.nodes())
-        adj_matrix = nx.adjacency_matrix(st.session_state.graph, nodelist=nodes_sorted).todense()
-        adj_df = pd.DataFrame(adj_matrix, index=nodes_sorted, columns=nodes_sorted)
-        
-        # Création du ZIP
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
-            zip_file.writestr('centralites.csv', centrality_df.to_csv(index=False))
-            zip_file.writestr('clustering.csv', clustering_df.to_csv(index=False))
-            zip_file.writestr('kcore.csv', kcore_df.to_csv(index=False))
-            zip_file.writestr('cliques.csv', cliques_df.to_csv(index=False))
-            zip_file.writestr('noeuds.csv', nodes_df.to_csv(index=False))
-            zip_file.writestr('aretes.csv', edges_df.to_csv(index=False))
-            zip_file.writestr('matrice_adjacence.csv', adj_df.to_csv())
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        st.download_button(
-            label="📥 Télécharger Tous les CSV (ZIP)",
-            data=zip_buffer.getvalue(),
-            file_name=f"karate_club_analyses_completes_{timestamp}.zip",
-            mime="application/zip"
-        )
+            
+            clustering_df = pd.DataFrame({
+                "Sommet": metrics["nodes"],
+                "Clustering": [metrics["clustering_dict"][v] for v in metrics["nodes"]],
+                "Degré": [metrics["degree_dict"][v] for v in metrics["nodes"]]
+            })
+            
+            kcore_df = pd.DataFrame({
+                "Sommet": metrics["nodes"],
+                "K-core": [metrics["core_numbers"][v] for v in metrics["nodes"]],
+                "Degré": [metrics["degree_dict"][v] for v in metrics["nodes"]]
+            })
+            
+            cliques_df = pd.DataFrame({
+                "Clique": [', '.join(map(str, sorted(c))) for c in metrics["cliques"]],
+                "Taille": [len(c) for c in metrics["cliques"]]
+            })
+            
+            # Données des nœuds et arêtes
+            nodes_data = []
+            for node in st.session_state.graph.nodes():
+                nodes_data.append({
+                    'Nœud': node,
+                    'Groupe': st.session_state.graph.nodes[node].get('group', 'Non assigné'),
+                    'Degré': st.session_state.graph.degree(node)
+                })
+            nodes_df = pd.DataFrame(nodes_data)
+            
+            edges_data = []
+            for edge in st.session_state.graph.edges():
+                edges_data.append({'Source': edge[0], 'Cible': edge[1]})
+            edges_df = pd.DataFrame(edges_data)
+            
+            # Matrice d'adjacence simplifiée (évite scipy)
+            nodes_sorted = sorted(st.session_state.graph.nodes())
+            adj_data = []
+            for i, node1 in enumerate(nodes_sorted):
+                row = {}
+                for j, node2 in enumerate(nodes_sorted):
+                    row[node2] = 1 if st.session_state.graph.has_edge(node1, node2) else 0
+                adj_data.append(row)
+            
+            adj_df = pd.DataFrame(adj_data, index=nodes_sorted)
+            adj_df.index.name = 'Nœud'
+            
+            # Création du ZIP
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+                zip_file.writestr('centralites.csv', centrality_df.to_csv(index=False))
+                zip_file.writestr('clustering.csv', clustering_df.to_csv(index=False))
+                zip_file.writestr('kcore.csv', kcore_df.to_csv(index=False))
+                zip_file.writestr('cliques.csv', cliques_df.to_csv(index=False))
+                zip_file.writestr('noeuds.csv', nodes_df.to_csv(index=False))
+                zip_file.writestr('aretes.csv', edges_df.to_csv(index=False))
+                zip_file.writestr('matrice_adjacence.csv', adj_df.to_csv())
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            st.download_button(
+                label="📥 Télécharger Tous les CSV (ZIP)",
+                data=zip_buffer.getvalue(),
+                file_name=f"karate_club_analyses_completes_{timestamp}.zip",
+                mime="application/zip"
+            )
+            
+        except Exception as e:
+            st.error(f"❌ Erreur lors de l'export : {str(e)}")
     
     def export_all_images(self):
         """Exporte toutes les images dans un ZIP"""
-        # Cette fonction nécessiterait de regénérer tous les graphiques
-        # Pour l'instant, on exporte juste la visualisation principale
         st.info("🖼️ Utilisez les boutons d'export individuels dans chaque section pour les graphiques spécifiques")
     
     def export_full_report(self):
