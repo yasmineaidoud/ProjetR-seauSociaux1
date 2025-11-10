@@ -47,6 +47,14 @@ st.markdown("""
         border-radius: 10px;
         margin: 1rem 0;
     }
+    .group-color {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 8px;
+        border: 1px solid #ccc;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -123,11 +131,16 @@ class KarateApp:
             st.rerun()
     
     def redo(self):
-        """Avance dans l'historique - annule un retour"""
+        """Avance dans l'historique - annule un retour (retour à l'état avant le retour)"""
         if st.session_state.history_index < len(st.session_state.history) - 1:
             st.session_state.history_index += 1
             st.session_state.graph = st.session_state.history[st.session_state.history_index].copy()
             st.rerun()
+    
+    def get_group_display_name(self, group_name):
+        """Retourne le nom du groupe avec un cercle de couleur"""
+        color = st.session_state.groups.get(group_name, "#cccccc")
+        return f"<span class='group-color' style='background-color: {color};'></span>{group_name}"
     
     def run(self):
         # Navigation entre pages
@@ -169,9 +182,9 @@ class KarateApp:
                     self.undo()
             
             with col_redo:
-                # Le bouton Avancer est activé si on a fait au moins un Retour
-                # (c'est-à-dire si l'index actuel n'est pas le dernier)
-                redo_disabled = st.session_state.history_index == len(st.session_state.history) - 1
+                # CORRECTION : Le bouton Avancer est activé si on n'est pas au dernier état
+                # (c'est-à-dire si on a fait au moins un Retour)
+                redo_disabled = st.session_state.history_index >= len(st.session_state.history) - 1
                 if st.button("⏩ Avancer", disabled=redo_disabled):
                     self.redo()
             
@@ -181,11 +194,15 @@ class KarateApp:
             # Gestion des groupes - FLEXIBLE
             st.subheader("👥 Gestion des Groupes")
             
-            # Affichage des groupes existants
+            # Affichage des groupes existants avec leurs couleurs
             if st.session_state.groups:
                 st.write("**Groupes existants :**")
                 for group_name, color in st.session_state.groups.items():
-                    st.write(f"• {group_name} : :{color}[{color}]")
+                    # Affichage avec cercle de couleur
+                    st.markdown(f"<div style='display: flex; align-items: center; margin: 5px 0;'>"
+                               f"<div class='group-color' style='background-color: {color};'></div>"
+                               f"<span>{group_name} - <code>{color}</code></span>"
+                               f"</div>", unsafe_allow_html=True)
             
             # Formulaire pour ajouter un nouveau groupe
             with st.form("add_group_form"):
@@ -227,10 +244,11 @@ class KarateApp:
             existing_nodes = sorted(list(st.session_state.graph.nodes()))  # TRI CROISSANT
             new_node_id = st.number_input("ID du nœud", min_value=1, step=1, value=35)
             
-            # Liste déroulante des groupes avec TOUS les groupes disponibles
+            # Liste déroulante des groupes avec TOUS les groupes disponibles et leurs couleurs
             selected_group = st.selectbox(
                 "Groupe", 
-                list(st.session_state.groups.keys())  # Affiche tous les groupes
+                list(st.session_state.groups.keys()),  # Affiche tous les groupes
+                format_func=lambda x: f"● {x}"  # Ajoute un cercle avant le nom
             )
             
             # Sélection des connexions - LISTE TRIÉE
