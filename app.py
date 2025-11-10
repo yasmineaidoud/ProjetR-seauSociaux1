@@ -57,12 +57,12 @@ class KarateApp:
             st.session_state.history = [st.session_state.graph.copy()]
             st.session_state.history_index = 0
         
-        self.groups = {
-            "Turquoise (Instructeur)": "#40E0D0",
-            "Orange (Propriétaire)": "orange", 
-            "Nouveau Groupe 1": "#ff6b6b",
-            "Nouveau Groupe 2": "#4ecdc4"
-        }
+        # Groupes flexibles - stockés dans session_state pour persistance
+        if 'groups' not in st.session_state:
+            st.session_state.groups = {
+                "Turquoise (Instructeur)": "#40E0D0",
+                "Orange (Propriétaire)": "orange"
+            }
         
     def create_karate_graph(self):
         """Crée le graphe du club de karaté avec les nœuds commençant à 1"""
@@ -123,7 +123,7 @@ class KarateApp:
             st.rerun()
     
     def redo(self):
-        """Avance dans l'historique"""
+        """Avance dans l'historique - annule un retour"""
         if st.session_state.history_index < len(st.session_state.history) - 1:
             st.session_state.history_index += 1
             st.session_state.graph = st.session_state.history[st.session_state.history_index].copy()
@@ -164,32 +164,80 @@ class KarateApp:
             st.subheader("⏪ Historique")
             col_undo, col_redo = st.columns(2)
             with col_undo:
-                if st.button("⏪ Retour", disabled=st.session_state.history_index == 0):
+                undo_disabled = st.session_state.history_index == 0
+                if st.button("⏪ Retour", disabled=undo_disabled):
                     self.undo()
+            
             with col_redo:
-                if st.button("⏩ Avancer", 
-                           disabled=st.session_state.history_index == len(st.session_state.history) - 1):
+                # Le bouton Avancer est activé si on a fait au moins un Retour
+                # (c'est-à-dire si l'index actuel n'est pas le dernier)
+                redo_disabled = st.session_state.history_index == len(st.session_state.history) - 1
+                if st.button("⏩ Avancer", disabled=redo_disabled):
                     self.redo()
             
-            # Gestion des groupes
+            # Indicateur d'état historique
+            st.caption(f"État {st.session_state.history_index + 1}/{len(st.session_state.history)}")
+            
+            # Gestion des groupes - FLEXIBLE
             st.subheader("👥 Gestion des Groupes")
-            new_group = st.text_input("Nom du nouveau groupe")
-            new_color = st.color_picker("Couleur du groupe", "#ff6b6b")
-            if st.button("➕ Ajouter Groupe") and new_group:
-                self.groups[new_group] = new_color
-                st.success(f"Groupe '{new_group}' ajouté!")
+            
+            # Affichage des groupes existants
+            if st.session_state.groups:
+                st.write("**Groupes existants :**")
+                for group_name, color in st.session_state.groups.items():
+                    st.write(f"• {group_name} : :{color}[{color}]")
+            
+            # Formulaire pour ajouter un nouveau groupe
+            with st.form("add_group_form"):
+                new_group = st.text_input("Nom du nouveau groupe", placeholder="Ex: Nouveau Groupe Bleu")
+                new_color = st.color_picker("Couleur du groupe", "#ff6b6b")
+                add_group_submitted = st.form_submit_button("➕ Ajouter Groupe")
+                
+                if add_group_submitted and new_group:
+                    if new_group in st.session_state.groups:
+                        st.error(f"❌ Le groupe '{new_group}' existe déjà!")
+                    else:
+                        st.session_state.groups[new_group] = new_color
+                        st.success(f"✅ Groupe '{new_group}' ajouté avec la couleur {new_color}!")
+                        st.rerun()
+            
+            # Option pour supprimer un groupe
+            if len(st.session_state.groups) > 2:  # Au moins 3 groupes pour permettre la suppression
+                group_to_delete = st.selectbox(
+                    "Groupe à supprimer", 
+                    [group for group in st.session_state.groups.keys() 
+                     if group not in ["Turquoise (Instructeur)", "Orange (Propriétaire)"]]
+                )
+                if st.button("🗑️ Supprimer le Groupe", type="secondary"):
+                    # Réaffecter les nœuds du groupe supprimé vers un groupe par défaut
+                    deleted_group_nodes = [
+                        node for node in st.session_state.graph.nodes() 
+                        if st.session_state.graph.nodes[node].get('group') == group_to_delete
+                    ]
+                    
+                    for node in deleted_group_nodes:
+                        st.session_state.graph.nodes[node]['group'] = "Turquoise (Instructeur)"
+                    
+                    del st.session_state.groups[group_to_delete]
+                    st.success(f"✅ Groupe '{group_to_delete}' supprimé!")
+                    st.rerun()
             
             # Ajout de nœud
             st.subheader("🔘 Ajouter un Nœud")
+            existing_nodes = sorted(list(st.session_state.graph.nodes()))  # TRI CROISSANT
             new_node_id = st.number_input("ID du nœud", min_value=1, step=1, value=35)
-            selected_group = st.selectbox("Groupe", list(self.groups.keys()))
             
-            # Sélection des connexions
+            # Liste déroulante des groupes avec TOUS les groupes disponibles
+            selected_group = st.selectbox(
+                "Groupe", 
+                list(st.session_state.groups.keys())  # Affiche tous les groupes
+            )
+            
+            # Sélection des connexions - LISTE TRIÉE
             st.write("**Connexions :**")
-            existing_nodes = list(st.session_state.graph.nodes())
             connections = st.multiselect(
                 "Sélectionnez les nœuds connectés",
-                existing_nodes,
+                existing_nodes,  # Déjà trié
                 help="Choisissez tous les nœuds qui auront une relation avec le nouveau"
             )
             
@@ -200,9 +248,11 @@ class KarateApp:
             st.subheader("🔗 Gestion des Arêtes")
             col_edge1, col_edge2 = st.columns(2)
             with col_edge1:
-                edge_node1 = st.selectbox("Nœud 1", existing_nodes)
+                edge_node1 = st.selectbox("Nœud 1", existing_nodes)  # TRIÉ
             with col_edge2:
-                edge_node2 = st.selectbox("Nœud 2", [n for n in existing_nodes if n != edge_node1])
+                # Filtrer pour éviter les doublons et trier
+                available_nodes = sorted([n for n in existing_nodes if n != edge_node1])
+                edge_node2 = st.selectbox("Nœud 2", available_nodes)  # TRIÉ
             
             col_add, col_remove = st.columns(2)
             with col_add:
@@ -215,7 +265,7 @@ class KarateApp:
             # Suppression de nœud
             st.subheader("🗑️ Suppression")
             if existing_nodes:
-                node_to_delete = st.selectbox("Nœud à supprimer", existing_nodes)
+                node_to_delete = st.selectbox("Nœud à supprimer", existing_nodes)  # TRIÉ
                 if st.button("🔴 Supprimer Nœud", type="primary"):
                     self.delete_node(node_to_delete)
             else:
@@ -671,7 +721,7 @@ class KarateApp:
         node_colors = []
         for node in st.session_state.graph.nodes():
             group = st.session_state.graph.nodes[node].get('group', 'Turquoise (Instructeur)')
-            node_colors.append(self.groups.get(group, "#cccccc"))
+            node_colors.append(st.session_state.groups.get(group, "#cccccc"))
         
         # Dessin avec effet néon en mode dark
         if dark_mode:
