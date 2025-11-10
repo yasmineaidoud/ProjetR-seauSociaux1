@@ -1076,6 +1076,7 @@ class KarateApp:
             mime="text/plain"
         )
 
+
 # Lancement
 if __name__ == "__main__":
     app = KarateApp()
