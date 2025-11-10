@@ -11,8 +11,8 @@ import zipfile
 
 # Configuration de la page
 st.set_page_config(
-    page_title="Karate Club Analyzer",
-    page_icon="🥋",
+    page_title="Karate Club Netw Analyzer",
+    page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -80,7 +80,7 @@ class KarateApp:
             }
         
     def create_karate_graph(self):
-        """Crée le graphe du club de karaté avec les nœuds commençant à 1"""
+        """Crée le graphe du club de karaté avec les nœuds"""
         G = nx.Graph()
         edges = [
             (1,12),(1,18),(1,6),(1,7),(1,11),(1,5),(1,13),(1,8),(1,4),(1,3),(1,14),
@@ -295,6 +295,16 @@ class KarateApp:
         if dark_mode:
             st.markdown('</div>', unsafe_allow_html=True)
     
+    def get_all_groups_nodes(self):
+        """Retourne un dictionnaire avec tous les groupes et leurs nœuds de façon flexible"""
+        groups_nodes = {}
+        for group_name in st.session_state.groups.keys():
+            groups_nodes[group_name] = [
+                node for node in st.session_state.graph.nodes() 
+                if st.session_state.graph.nodes[node].get('group') == group_name
+            ]
+        return groups_nodes
+    
     def analytics_page(self):
         """Page dashboard analytique complet"""
         st.markdown('<h1 class="main-header">📊 Dashboard Analytique Complet</h1>', 
@@ -334,7 +344,8 @@ class KarateApp:
             "📊 Centralités", 
             "🎯 Clustering", 
             "🔍 Motifs & Cliques",
-            "📈 K-core & Distribution"
+            "📈 K-core & Distribution",
+            "👑 Analyse par Groupes"
         ])
         
         with tabs[0]:
@@ -349,10 +360,127 @@ class KarateApp:
         with tabs[3]:
             self.display_kcore_distribution_analysis(all_metrics)
         
-        # Analyse des leaders et ponts
-        st.header("👑 Leaders et Ponts entre Groupes")
-        self.display_leaders_bridges_analysis(all_metrics)
+        with tabs[4]:
+            self.display_groups_analysis(all_metrics)
     
+    def display_groups_analysis(self, metrics):
+        """Affiche l'analyse flexible par groupes"""
+        st.subheader("👥 Analyse par Groupes")
+        
+        # Récupération flexible de tous les groupes
+        groups_nodes = self.get_all_groups_nodes()
+        
+        # Statistiques par groupe
+        st.write("### 📊 Statistiques par Groupe")
+        
+        groups_stats = []
+        for group_name, nodes in groups_nodes.items():
+            if nodes:  # Vérifier que le groupe n'est pas vide
+                group_degrees = [metrics["degree_dict"][node] for node in nodes]
+                group_clustering = [metrics["clustering_dict"][node] for node in nodes]
+                
+                groups_stats.append({
+                    "Groupe": group_name,
+                    "Nœuds": len(nodes),
+                    "Degré Moyen": f"{np.mean(group_degrees):.2f}",
+                    "Clustering Moyen": f"{np.mean(group_clustering):.3f}",
+                    "Densité Interne": f"{self.calculate_internal_density(nodes):.3f}"
+                })
+        
+        if groups_stats:
+            stats_df = pd.DataFrame(groups_stats)
+            st.dataframe(stats_df, use_container_width=True)
+        
+        # Leaders par groupe
+        st.write("### 👑 Leaders par Groupe")
+        
+        leaders_data = []
+        for group_name, nodes in groups_nodes.items():
+            if nodes:  # Vérifier que le groupe n'est pas vide
+                # Trouver le leader par centralité de degré
+                group_centralities = [(n, metrics["degree_centrality"][n]) for n in nodes]
+                if group_centralities:
+                    leader = max(group_centralities, key=lambda x: x[1])
+                    leaders_data.append([group_name, leader[0], f"{leader[1]:.3f}"])
+        
+        if leaders_data:
+            leaders_df = pd.DataFrame(leaders_data, columns=["Groupe", "Leader", "Centralité Degré"])
+            st.dataframe(leaders_df, use_container_width=True)
+        
+        # Ponts entre groupes
+        st.write("### 🌉 Ponts entre Groupes")
+        
+        bridges_data = []
+        for group_name, nodes in groups_nodes.items():
+            if nodes:  # Vérifier que le groupe n'est pas vide
+                for node in nodes:
+                    # Compter les connexions vers d'autres groupes
+                    inter_connections = {}
+                    for neighbor in st.session_state.graph.neighbors(node):
+                        neighbor_group = st.session_state.graph.nodes[neighbor].get('group')
+                        if neighbor_group != group_name:
+                            inter_connections[neighbor_group] = inter_connections.get(neighbor_group, 0) + 1
+                    
+                    # Ajouter les ponts significatifs
+                    for target_group, count in inter_connections.items():
+                        if count > 0:
+                            bridges_data.append([node, group_name, target_group, count])
+        
+        if bridges_data:
+            bridges_df = pd.DataFrame(bridges_data, 
+                                    columns=["Nœud", "Groupe Source", "Groupe Cible", "Connexions"])
+            bridges_df = bridges_df.sort_values("Connexions", ascending=False)
+            st.dataframe(bridges_df, use_container_width=True, height=300)
+        else:
+            st.info("Aucun pont identifié entre les groupes")
+        
+        # Visualisation des connexions inter-groupes
+        st.write("### 🔗 Matrice des Connexions Inter-Groupes")
+        
+        connection_matrix = self.calculate_intergroup_connections()
+        if connection_matrix is not None:
+            st.dataframe(connection_matrix, use_container_width=True)
+        
+        # Export section
+        with st.expander("📤 Exporter l'Analyse par Groupes"):
+            if groups_stats:
+                self.export_dataframe(pd.DataFrame(groups_stats), "statistiques_groupes")
+            if leaders_data:
+                self.export_dataframe(leaders_df, "leaders_groupes")
+            if bridges_data:
+                self.export_dataframe(bridges_df, "ponts_intergroupes")
+    
+    def calculate_internal_density(self, nodes):
+        """Calcule la densité interne d'un groupe de nœuds"""
+        if len(nodes) < 2:
+            return 0.0
+        
+        subgraph = st.session_state.graph.subgraph(nodes)
+        possible_edges = len(nodes) * (len(nodes) - 1) / 2
+        actual_edges = subgraph.number_of_edges()
+        
+        return actual_edges / possible_edges if possible_edges > 0 else 0.0
+    
+    def calculate_intergroup_connections(self):
+        """Calcule la matrice des connexions entre groupes"""
+        groups_nodes = self.get_all_groups_nodes()
+        group_names = list(groups_nodes.keys())
+        
+        # Créer une matrice vide
+        connection_matrix = pd.DataFrame(0, index=group_names, columns=group_names)
+        
+        # Compter les arêtes entre groupes
+        for edge in st.session_state.graph.edges():
+            node1, node2 = edge
+            group1 = st.session_state.graph.nodes[node1].get('group')
+            group2 = st.session_state.graph.nodes[node2].get('group')
+            
+            if group1 != group2 and group1 in group_names and group2 in group_names:
+                connection_matrix.loc[group1, group2] += 1
+                connection_matrix.loc[group2, group1] += 1  # Graphe non orienté
+        
+        return connection_matrix if not connection_matrix.empty else None
+
     def calculate_all_metrics(self):
         """Calcule toutes les métriques du notebook"""
         G = st.session_state.graph
@@ -446,6 +574,7 @@ class KarateApp:
         # Création du DataFrame des centralités
         centrality_df = pd.DataFrame({
             "Sommet": metrics["nodes"],
+            "Groupe": [st.session_state.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
             "Degré": [metrics["degree_centrality"][v] for v in metrics["nodes"]],
             "Proximité": [metrics["closeness_dict"][v] for v in metrics["nodes"]],
             "Intermédiarité": [metrics["betweenness_dict"][v] for v in metrics["nodes"]],
@@ -465,9 +594,9 @@ class KarateApp:
         for i, col in enumerate(cols):
             with col:
                 st.write(f"**{centralities[i]}**")
-                top_3 = centrality_df.nlargest(3, centralities[i])[["Sommet", centralities[i]]]
+                top_3 = centrality_df.nlargest(3, centralities[i])[["Sommet", "Groupe", centralities[i]]]
                 for _, row in top_3.iterrows():
-                    st.write(f"• {int(row['Sommet'])}: {row[centralities[i]]:.3f}")
+                    st.write(f"• {int(row['Sommet'])} ({row['Groupe']}): {row[centralities[i]]:.3f}")
         
         # Graphique comparatif
         fig, ax = plt.subplots(figsize=(12, 6))
@@ -509,6 +638,7 @@ class KarateApp:
         # DataFrame du clustering
         clustering_df = pd.DataFrame({
             "Sommet": metrics["nodes"],
+            "Groupe": [st.session_state.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
             "Clustering": [metrics["clustering_dict"][v] for v in metrics["nodes"]],
             "Degré": [metrics["degree_dict"][v] for v in metrics["nodes"]]
         }).sort_values(by="Clustering", ascending=False)
@@ -585,6 +715,7 @@ class KarateApp:
         # DataFrame K-core
         kcore_df = pd.DataFrame({
             "Sommet": metrics["nodes"],
+            "Groupe": [st.session_state.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
             "K-core": [metrics["core_numbers"][v] for v in metrics["nodes"]],
             "Degré": [metrics["degree_dict"][v] for v in metrics["nodes"]]
         }).sort_values(by="K-core", ascending=False)
@@ -619,59 +750,7 @@ class KarateApp:
                 self.export_dataframe(kcore_df, "kcore_analysis")
             with col2:
                 self.export_plot(fig, "kcore_distribution")
-    
-    def display_leaders_bridges_analysis(self, metrics):
-        """Affiche l'analyse des leaders et ponts avec export"""
-        # Définition des groupes
-        turquoise_nodes = [1,2,3,4,5,6,7,8,9,11,12,13,14,17,18,20,22]
-        orange_nodes = [n for n in metrics["nodes"] if n not in turquoise_nodes]
-        
-        groupes = {
-            "Turquoise (Instructeur)": turquoise_nodes,
-            "Orange (Propriétaire)": orange_nodes
-        }
-        
-        leaders_data = []
-        bridges_data = []
-        
-        for nom_groupe, noeuds_groupe in groupes.items():
-            # Filtrer les nœuds du groupe
-            groupe_centralites = [(n, metrics["degree_centrality"][n]) for n in noeuds_groupe]
-            leader = max(groupe_centralites, key=lambda x: x[1])[0]
-            leaders_data.append([nom_groupe, leader, metrics["degree_centrality"][leader]])
-            
-            # Ponts inter-groupes
-            for node in noeuds_groupe:
-                if node in turquoise_nodes:
-                    inter_conn = sum(1 for neighbor in st.session_state.graph.neighbors(node) if neighbor in orange_nodes)
-                else:
-                    inter_conn = sum(1 for neighbor in st.session_state.graph.neighbors(node) if neighbor in turquoise_nodes)
-                
-                if inter_conn > 0:
-                    bridges_data.append([node, nom_groupe, inter_conn])
-        
-        # Affichage des leaders
-        st.subheader("👑 Leaders des Groupes")
-        leaders_df = pd.DataFrame(leaders_data, columns=["Groupe", "Leader", "Centralité Degré"])
-        st.dataframe(leaders_df, use_container_width=True)
-        
-        # Affichage des ponts
-        st.subheader("🌉 Ponts entre Groupes")
-        if bridges_data:
-            bridges_df = pd.DataFrame(bridges_data, columns=["Nœud", "Groupe", "Connexions Inter-groupes"])
-            bridges_df = bridges_df.sort_values("Connexions Inter-groupes", ascending=False)
-            st.dataframe(bridges_df, use_container_width=True, height=300)
-        else:
-            st.info("Aucun pont identifié entre les groupes")
-        
-        # Export section
-        with st.expander("📤 Exporter l'Analyse Leaders & Ponts"):
-            col1, col2 = st.columns(2)
-            with col1:
-                self.export_dataframe(leaders_df, "leaders_analysis")
-            with col2:
-                if bridges_data:
-                    self.export_dataframe(bridges_df, "bridges_analysis")
+
     
     def add_node(self, node_id, group, connections):
         """Ajoute un nœud avec ses connexions"""
@@ -832,6 +911,7 @@ class KarateApp:
             # Création de tous les DataFrames
             centrality_df = pd.DataFrame({
                 "Sommet": metrics["nodes"],
+                "Groupe": [st.session_state.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
                 "Degré": [metrics["degree_centrality"][v] for v in metrics["nodes"]],
                 "Proximité": [metrics["closeness_dict"][v] for v in metrics["nodes"]],
                 "Intermédiarité": [metrics["betweenness_dict"][v] for v in metrics["nodes"]],
@@ -841,12 +921,14 @@ class KarateApp:
             
             clustering_df = pd.DataFrame({
                 "Sommet": metrics["nodes"],
+                "Groupe": [st.session_state.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
                 "Clustering": [metrics["clustering_dict"][v] for v in metrics["nodes"]],
                 "Degré": [metrics["degree_dict"][v] for v in metrics["nodes"]]
             })
             
             kcore_df = pd.DataFrame({
                 "Sommet": metrics["nodes"],
+                "Groupe": [st.session_state.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
                 "K-core": [metrics["core_numbers"][v] for v in metrics["nodes"]],
                 "Degré": [metrics["degree_dict"][v] for v in metrics["nodes"]]
             })
@@ -883,6 +965,24 @@ class KarateApp:
             adj_df = pd.DataFrame(adj_data, index=nodes_sorted)
             adj_df.index.name = 'Nœud'
             
+            # Analyse par groupes (nouvelle)
+            groups_nodes = self.get_all_groups_nodes()
+            groups_stats = []
+            for group_name, nodes in groups_nodes.items():
+                if nodes:
+                    group_degrees = [metrics["degree_dict"][node] for node in nodes]
+                    group_clustering = [metrics["clustering_dict"][node] for node in nodes]
+                    
+                    groups_stats.append({
+                        "Groupe": group_name,
+                        "Nœuds": len(nodes),
+                        "Degré Moyen": f"{np.mean(group_degrees):.2f}",
+                        "Clustering Moyen": f"{np.mean(group_clustering):.3f}",
+                        "Densité Interne": f"{self.calculate_internal_density(nodes):.3f}"
+                    })
+            
+            groups_df = pd.DataFrame(groups_stats) if groups_stats else pd.DataFrame()
+            
             # Création du ZIP
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
@@ -893,6 +993,8 @@ class KarateApp:
                 zip_file.writestr('noeuds.csv', nodes_df.to_csv(index=False))
                 zip_file.writestr('aretes.csv', edges_df.to_csv(index=False))
                 zip_file.writestr('matrice_adjacence.csv', adj_df.to_csv())
+                if not groups_df.empty:
+                    zip_file.writestr('statistiques_groupes.csv', groups_df.to_csv(index=False))
             
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             st.download_button(
@@ -928,8 +1030,28 @@ class KarateApp:
         report += f"- Plus grande clique: {metrics['max_clique']} (taille: {metrics['taille_max_clique']})\n"
         report += f"- K-core maximal: {metrics['k_core_max']}\n\n"
         
+        # Analyse par groupes
+        report += "ANALYSE PAR GROUPES:\n"
+        groups_nodes = self.get_all_groups_nodes()
+        for group_name, nodes in groups_nodes.items():
+            if nodes:
+                group_degrees = [metrics["degree_dict"][node] for node in nodes]
+                group_clustering = [metrics["clustering_dict"][node] for node in nodes]
+                
+                report += f"\n{group_name}:\n"
+                report += f"  - Nœuds: {len(nodes)}\n"
+                report += f"  - Degré moyen: {np.mean(group_degrees):.2f}\n"
+                report += f"  - Clustering moyen: {np.mean(group_clustering):.3f}\n"
+                report += f"  - Densité interne: {self.calculate_internal_density(nodes):.3f}\n"
+                
+                # Leader du groupe
+                group_centralities = [(n, metrics["degree_centrality"][n]) for n in nodes]
+                if group_centralities:
+                    leader = max(group_centralities, key=lambda x: x[1])
+                    report += f"  - Leader: Nœud {leader[0]} (centralité: {leader[1]:.3f})\n"
+        
         # Top centralités
-        report += "TOP CENTRALITÉS:\n"
+        report += "\nTOP CENTRALITÉS:\n"
         centrality_types = [
             ("DEGRÉ", metrics["degree_centrality"]),
             ("PROXIMITÉ", metrics["closeness_dict"]),
@@ -942,7 +1064,8 @@ class KarateApp:
             top_3 = sorted(centrality_dict.items(), key=lambda x: x[1], reverse=True)[:3]
             report += f"{name}:\n"
             for node, value in top_3:
-                report += f"  • Nœud {node}: {value:.3f}\n"
+                group = st.session_state.graph.nodes[node].get('group', 'Non assigné')
+                report += f"  • Nœud {node} ({group}): {value:.3f}\n"
             report += "\n"
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
