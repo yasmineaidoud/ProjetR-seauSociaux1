@@ -11,7 +11,7 @@ import zipfile
 
 # Configuration de la page
 st.set_page_config(
-    page_title="Karate Club Netw Analyzer",
+    page_title="Karate Club Network Analyzer",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -62,6 +62,10 @@ st.markdown("""
         color: #666;
         font-size: 0.9rem;
     }
+    .adjacency-matrix {
+        max-height: 600px;
+        overflow: auto;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -78,6 +82,11 @@ class KarateApp:
                 "Turquoise (Instructeur)": "#40E0D0",
                 "Orange (Propriétaire)": "orange"
             }
+    
+    @property
+    def graph(self):
+        """Property pour accéder au graph depuis st.session_state"""
+        return st.session_state.graph
         
     def create_karate_graph(self):
         """Crée le graphe du club de karaté avec les nœuds"""
@@ -122,6 +131,213 @@ class KarateApp:
                 G.nodes[node]['group'] = "Orange (Propriétaire)"
         
         return G
+
+    def get_adjacency_matrix(self):
+        """Retourne la matrice d'adjacence complète du réseau"""
+        nodes = sorted(list(self.graph.nodes()))
+        n = len(nodes)
+        adj_matrix = np.zeros((n, n), dtype=int)
+        
+        # Remplir la matrice d'adjacence
+        for i, node1 in enumerate(nodes):
+            for j, node2 in enumerate(nodes):
+                if self.graph.has_edge(node1, node2):
+                    adj_matrix[i][j] = 1
+        
+        return adj_matrix, nodes
+
+    def display_adjacency_matrix(self):
+        """Affiche la matrice d'adjacence avec styling"""
+        st.subheader("📐 Matrice d'Adjacence du Réseau")
+        
+        adj_matrix, nodes = self.get_adjacency_matrix()
+        
+        # Créer un DataFrame pour un meilleur affichage
+        adj_df = pd.DataFrame(adj_matrix, 
+                             index=nodes, 
+                             columns=nodes)
+        
+        # Appliquer un style pour mieux visualiser
+        def style_adjacency_matrix(val):
+            if val == 1:
+                return 'background-color: #ff6b6b; color: white; font-weight: bold;'
+            else:
+                return 'background-color: #f8f9fa; color: #666;'
+        
+        styled_df = adj_df.style.map(style_adjacency_matrix).set_properties(**{
+            'border': '1px solid #dee2e6',
+            'text-align': 'center',
+            'width': '35px',
+            'height': '35px',
+            'font-size': '12px'
+        })
+        
+        # Afficher la matrice avec défilement
+        st.markdown('<div class="adjacency-matrix">', unsafe_allow_html=True)
+        st.dataframe(styled_df, use_container_width=True, height=400)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Statistiques de la matrice
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Taille Matrice", f"{len(nodes)}×{len(nodes)}")
+        with col2:
+            total_connections = np.sum(adj_matrix) // 2
+            st.metric("Connexions Total", f"{total_connections}")
+        with col3:
+            density = (np.sum(adj_matrix) / (len(nodes)**2)) * 100
+            st.metric("Densité Matricielle", f"{density:.1f}%")
+        with col4:
+            symmetry_check = np.array_equal(adj_matrix, adj_matrix.T)
+            st.metric("Matrice Symétrique", "✅" if symmetry_check else "❌")
+
+    def display_matrix_analysis(self):
+        """Analyse approfondie de la matrice d'adjacence"""
+        st.subheader("🔬 Analyse Avancée de la Matrice")
+        
+        adj_matrix, nodes = self.get_adjacency_matrix()
+        
+        # Propriétés spectrales
+        st.write("### 📊 Propriétés Spectrales")
+        
+        try:
+            # Valeurs propres
+            eigenvalues = np.linalg.eigvals(adj_matrix)
+            real_eigenvalues = eigenvalues.real
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Valeur Propre Max", f"{np.max(real_eigenvalues):.3f}")
+            with col2:
+                st.metric("Valeur Propre Min", f"{np.min(real_eigenvalues):.3f}")
+            with col3:
+                st.metric("Trace", f"{np.trace(adj_matrix)}")
+            with col4:
+                spectral_radius = np.max(np.abs(eigenvalues))
+                st.metric("Rayon Spectral", f"{spectral_radius:.3f}")
+                
+            # Distribution des valeurs propres
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.hist(real_eigenvalues, bins=15, alpha=0.7, edgecolor='black', color='skyblue')
+            ax.set_xlabel('Valeurs Propres Réelles')
+            ax.set_ylabel('Fréquence')
+            ax.set_title('Distribution des Valeurs Propres de la Matrice d\'Adjacence')
+            ax.grid(True, alpha=0.3)
+            st.pyplot(fig)
+            
+        except Exception as e:
+            st.warning(f"Impossible de calculer les valeurs propres: {e}")
+        
+        # Distribution des degrés depuis la matrice
+        st.write("### 📈 Analyse des Degrés depuis la Matrice")
+        degrees_from_matrix = np.sum(adj_matrix, axis=1)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Histogramme des degrés
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.hist(degrees_from_matrix, bins=15, alpha=0.7, edgecolor='black', color='lightcoral')
+            ax.set_xlabel('Degré (somme des lignes)')
+            ax.set_ylabel('Nombre de nœuds')
+            ax.set_title('Distribution des Degrés depuis la Matrice')
+            ax.grid(True, alpha=0.3)
+            st.pyplot(fig)
+        
+        with col2:
+            # Comparaison avec NetworkX
+            nx_degrees = [self.graph.degree(node) for node in nodes]
+            comparison_df = pd.DataFrame({
+                'Nœud': nodes,
+                'Degré Matrice': degrees_from_matrix,
+                'Degré NetworkX': nx_degrees
+            })
+            st.dataframe(comparison_df, use_container_width=True, height=300)
+        
+        # Matrice de distance
+        st.write("### 🗺️ Matrice des Plus Courts Chemins")
+        try:
+            path_matrix = np.zeros(adj_matrix.shape)
+            for i, node1 in enumerate(nodes):
+                for j, node2 in enumerate(nodes):
+                    try:
+                        path_length = nx.shortest_path_length(self.graph, node1, node2)
+                        path_matrix[i][j] = path_length
+                    except:
+                        path_matrix[i][j] = -1  # Pas de chemin
+            
+            path_df = pd.DataFrame(path_matrix, index=nodes, columns=nodes).astype(int)
+            
+            # Style pour la matrice des distances
+            def style_distance_matrix(val):
+                if val == 0:
+                    return 'background-color: #e9ecef; color: #666;'
+                elif val == 1:
+                    return 'background-color: #d4edda; color: #155724;'
+                elif val == 2:
+                    return 'background-color: #fff3cd; color: #856404;'
+                elif val >= 3:
+                    return 'background-color: #f8d7da; color: #721c24;'
+                else:
+                    return 'background-color: #f8f9fa; color: #666;'
+            
+            styled_path_df = path_df.style.map(style_distance_matrix).set_properties(**{
+                'border': '1px solid #dee2e6',
+                'text-align': 'center',
+                'width': '35px',
+                'height': '35px',
+                'font-size': '11px'
+            })
+            
+            st.dataframe(styled_path_df, use_container_width=True, height=400)
+            
+            # Statistiques des distances
+            valid_distances = path_matrix[path_matrix >= 0]
+            if len(valid_distances) > 0:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Distance Moyenne", f"{np.mean(valid_distances):.2f}")
+                with col2:
+                    st.metric("Diamètre", f"{np.max(valid_distances)}")
+                with col3:
+                    st.metric("Distance Médiane", f"{np.median(valid_distances)}")
+            
+        except Exception as e:
+            st.error(f"Erreur calcul des plus courts chemins: {e}")
+
+    def export_adjacency_data(self):
+        """Export des données de la matrice d'adjacence"""
+        st.subheader("📤 Export des Données Matricielles")
+        
+        adj_matrix, nodes = self.get_adjacency_matrix()
+        
+        # Format long pour l'export
+        export_data = []
+        for i, node1 in enumerate(nodes):
+            for j, node2 in enumerate(nodes):
+                if i <= j and adj_matrix[i][j] == 1:  # Éviter les doublons dans les graphes non orientés
+                    export_data.append({
+                        'Source': node1,
+                        'Cible': node2,
+                        'Type': 'Connexion directe'
+                    })
+        
+        export_df = pd.DataFrame(export_data)
+        
+        # Bouton d'export
+        if not export_df.empty:
+            csv = export_df.to_csv(index=False)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            st.download_button(
+                label="📥 Exporter la Matrice d'Adjacence (CSV)",
+                data=csv,
+                file_name=f"matrice_adjacence_karate_{timestamp}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        else:
+            st.warning("Aucune donnée à exporter")
     
     def save_state(self):
         """Sauvegarde l'état actuel dans l'historique"""
@@ -218,12 +434,12 @@ class KarateApp:
                 if st.button("🗑️ Supprimer le Groupe", type="secondary"):
                     # Réaffecter les nœuds du groupe supprimé vers un groupe par défaut
                     deleted_group_nodes = [
-                        node for node in st.session_state.graph.nodes() 
-                        if st.session_state.graph.nodes[node].get('group') == group_to_delete
+                        node for node in self.graph.nodes() 
+                        if self.graph.nodes[node].get('group') == group_to_delete
                     ]
                     
                     for node in deleted_group_nodes:
-                        st.session_state.graph.nodes[node]['group'] = "Turquoise (Instructeur)"
+                        self.graph.nodes[node]['group'] = "Turquoise (Instructeur)"
                     
                     del st.session_state.groups[group_to_delete]
                     st.success(f"✅ Groupe '{group_to_delete}' supprimé!")
@@ -231,7 +447,7 @@ class KarateApp:
             
             # Ajout de nœud
             st.subheader("🔘 Ajouter un Nœud")
-            existing_nodes = sorted(list(st.session_state.graph.nodes()))  # TRI CROISSANT
+            existing_nodes = sorted(list(self.graph.nodes()))  # TRI CROISSANT
             new_node_id = st.number_input("ID du nœud", min_value=1, step=1, value=35)
             
             # Liste déroulante des groupes avec TOUS les groupes disponibles et leurs couleurs
@@ -300,8 +516,8 @@ class KarateApp:
         groups_nodes = {}
         for group_name in st.session_state.groups.keys():
             groups_nodes[group_name] = [
-                node for node in st.session_state.graph.nodes() 
-                if st.session_state.graph.nodes[node].get('group') == group_name
+                node for node in self.graph.nodes() 
+                if self.graph.nodes[node].get('group') == group_name
             ]
         return groups_nodes
     
@@ -322,21 +538,21 @@ class KarateApp:
         with col2:
             st.metric("Arêtes", all_metrics["taille"])
         with col3:
-            st.metric("Densité", f"{nx.density(st.session_state.graph):.3f}")
+            st.metric("Densité", f"{nx.density(self.graph):.3f}")
         with col4:
             st.metric("Clustering Moyen", f"{all_metrics['coeff_moyen']:.3f}")
         
         col5, col6, col7, col8 = st.columns(4)
         with col5:
-            diameter = nx.diameter(st.session_state.graph) if nx.is_connected(st.session_state.graph) else "Non connecté"
+            diameter = nx.diameter(self.graph) if nx.is_connected(self.graph) else "Non connecté"
             st.metric("Diamètre", diameter)
         with col6:
-            st.metric("Composantes Connexes", nx.number_connected_components(st.session_state.graph))
+            st.metric("Composantes Connexes", nx.number_connected_components(self.graph))
         with col7:
-            avg_degree = np.mean([d for _, d in st.session_state.graph.degree()])
+            avg_degree = np.mean([d for _, d in self.graph.degree()])
             st.metric("Degré Moyen", f"{avg_degree:.2f}")
         with col8:
-            triangles = sum(nx.triangles(st.session_state.graph).values()) // 3
+            triangles = sum(nx.triangles(self.graph).values()) // 3
             st.metric("Triangles", triangles)
         
         # Affichage des différentes analyses avec export
@@ -345,7 +561,8 @@ class KarateApp:
             "🎯 Clustering", 
             "🔍 Motifs & Cliques",
             "📈 K-core & Distribution",
-            "👑 Analyse par Groupes"
+            "👑 Analyse par Groupes",
+            "📐 Matrice d'Adjacence"  # NOUVEL ONGLET
         ])
         
         with tabs[0]:
@@ -362,6 +579,12 @@ class KarateApp:
         
         with tabs[4]:
             self.display_groups_analysis(all_metrics)
+        
+        # NOUVEL ONGLET - Matrice d'Adjacence
+        with tabs[5]:
+            self.display_adjacency_matrix()
+            self.display_matrix_analysis()
+            self.export_adjacency_data()
     
     def display_groups_analysis(self, metrics):
         """Affiche l'analyse flexible par groupes"""
@@ -416,8 +639,8 @@ class KarateApp:
                 for node in nodes:
                     # Compter les connexions vers d'autres groupes
                     inter_connections = {}
-                    for neighbor in st.session_state.graph.neighbors(node):
-                        neighbor_group = st.session_state.graph.nodes[neighbor].get('group')
+                    for neighbor in self.graph.neighbors(node):
+                        neighbor_group = self.graph.nodes[neighbor].get('group')
                         if neighbor_group != group_name:
                             inter_connections[neighbor_group] = inter_connections.get(neighbor_group, 0) + 1
                     
@@ -455,7 +678,7 @@ class KarateApp:
         if len(nodes) < 2:
             return 0.0
         
-        subgraph = st.session_state.graph.subgraph(nodes)
+        subgraph = self.graph.subgraph(nodes)
         possible_edges = len(nodes) * (len(nodes) - 1) / 2
         actual_edges = subgraph.number_of_edges()
         
@@ -470,10 +693,10 @@ class KarateApp:
         connection_matrix = pd.DataFrame(0, index=group_names, columns=group_names)
         
         # Compter les arêtes entre groupes
-        for edge in st.session_state.graph.edges():
+        for edge in self.graph.edges():
             node1, node2 = edge
-            group1 = st.session_state.graph.nodes[node1].get('group')
-            group2 = st.session_state.graph.nodes[node2].get('group')
+            group1 = self.graph.nodes[node1].get('group')
+            group2 = self.graph.nodes[node2].get('group')
             
             if group1 != group2 and group1 in group_names and group2 in group_names:
                 connection_matrix.loc[group1, group2] += 1
@@ -483,7 +706,7 @@ class KarateApp:
 
     def calculate_all_metrics(self):
         """Calcule toutes les métriques du notebook"""
-        G = st.session_state.graph
+        G = self.graph
         nodes = list(G.nodes())
         edges = list(G.edges())
         
@@ -574,7 +797,7 @@ class KarateApp:
         # Création du DataFrame des centralités
         centrality_df = pd.DataFrame({
             "Sommet": metrics["nodes"],
-            "Groupe": [st.session_state.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
+            "Groupe": [self.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
             "Degré": [metrics["degree_centrality"][v] for v in metrics["nodes"]],
             "Proximité": [metrics["closeness_dict"][v] for v in metrics["nodes"]],
             "Intermédiarité": [metrics["betweenness_dict"][v] for v in metrics["nodes"]],
@@ -638,7 +861,7 @@ class KarateApp:
         # DataFrame du clustering
         clustering_df = pd.DataFrame({
             "Sommet": metrics["nodes"],
-            "Groupe": [st.session_state.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
+            "Groupe": [self.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
             "Clustering": [metrics["clustering_dict"][v] for v in metrics["nodes"]],
             "Degré": [metrics["degree_dict"][v] for v in metrics["nodes"]]
         }).sort_values(by="Clustering", ascending=False)
@@ -715,7 +938,7 @@ class KarateApp:
         # DataFrame K-core
         kcore_df = pd.DataFrame({
             "Sommet": metrics["nodes"],
-            "Groupe": [st.session_state.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
+            "Groupe": [self.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
             "K-core": [metrics["core_numbers"][v] for v in metrics["nodes"]],
             "Degré": [metrics["degree_dict"][v] for v in metrics["nodes"]]
         }).sort_values(by="K-core", ascending=False)
@@ -754,46 +977,46 @@ class KarateApp:
     
     def add_node(self, node_id, group, connections):
         """Ajoute un nœud avec ses connexions"""
-        if node_id in st.session_state.graph.nodes():
+        if node_id in self.graph.nodes():
             st.error(f"❌ Le nœud {node_id} existe déjà!")
             return
         
         self.save_state()
-        st.session_state.graph.add_node(node_id, group=group)
+        self.graph.add_node(node_id, group=group)
         
         for target_node in connections:
-            st.session_state.graph.add_edge(node_id, target_node)
+            self.graph.add_edge(node_id, target_node)
         
         st.success(f"✅ Nœud {node_id} ajouté avec {len(connections)} connexions!")
         st.rerun()
     
     def add_edge(self, node1, node2):
         """Ajoute une arête entre deux nœuds"""
-        if st.session_state.graph.has_edge(node1, node2):
+        if self.graph.has_edge(node1, node2):
             st.error("❌ Cette arête existe déjà!")
             return
         
         self.save_state()
-        st.session_state.graph.add_edge(node1, node2)
+        self.graph.add_edge(node1, node2)
         st.success(f"✅ Arête ({node1}-{node2}) ajoutée!")
         st.rerun()
     
     def remove_edge(self, node1, node2):
         """Supprime une arête spécifique"""
-        if not st.session_state.graph.has_edge(node1, node2):
+        if not self.graph.has_edge(node1, node2):
             st.error("❌ Cette arête n'existe pas!")
             return
         
         self.save_state()
-        st.session_state.graph.remove_edge(node1, node2)
+        self.graph.remove_edge(node1, node2)
         st.success(f"✅ Arête ({node1}-{node2}) supprimée!")
         st.rerun()
     
     def delete_node(self, node_id):
         """Supprime un nœud et toutes ses connexions"""
-        connections_count = len(list(st.session_state.graph.edges(node_id)))
+        connections_count = len(list(self.graph.edges(node_id)))
         self.save_state()
-        st.session_state.graph.remove_node(node_id)
+        self.graph.remove_node(node_id)
         st.success(f"🗑️ Nœud {node_id} et ses {connections_count} connexions supprimés!")
         st.rerun()
     
@@ -802,29 +1025,29 @@ class KarateApp:
         st.subheader("🌐 Visualisation du Réseau")
         
         fig, ax = plt.subplots(figsize=(12, 8))
-        pos = nx.spring_layout(st.session_state.graph, seed=42)
+        pos = nx.spring_layout(self.graph, seed=42)
         
         # Couleurs par groupe
         node_colors = []
-        for node in st.session_state.graph.nodes():
-            group = st.session_state.graph.nodes[node].get('group', 'Turquoise (Instructeur)')
+        for node in self.graph.nodes():
+            group = self.graph.nodes[node].get('group', 'Turquoise (Instructeur)')
             node_colors.append(st.session_state.groups.get(group, "#cccccc"))
         
         # Dessin avec effet néon en mode dark
         if dark_mode:
             # Arêtes blanches pour mode sombre
-            nx.draw_networkx_edges(st.session_state.graph, pos, alpha=0.7, width=1.5, 
+            nx.draw_networkx_edges(self.graph, pos, alpha=0.7, width=1.5, 
                                  edge_color='white', ax=ax)
             # Nœuds avec effet glow
-            nx.draw_networkx_nodes(st.session_state.graph, pos, node_color=node_colors, 
+            nx.draw_networkx_nodes(self.graph, pos, node_color=node_colors, 
                                  node_size=600, ax=ax, edgecolors='white', 
                                  linewidths=2, alpha=0.9)
         else:
-            nx.draw_networkx_edges(st.session_state.graph, pos, alpha=0.5, width=1.2, ax=ax)
-            nx.draw_networkx_nodes(st.session_state.graph, pos, node_color=node_colors, 
+            nx.draw_networkx_edges(self.graph, pos, alpha=0.5, width=1.2, ax=ax)
+            nx.draw_networkx_nodes(self.graph, pos, node_color=node_colors, 
                                  node_size=500, ax=ax, edgecolors='black', linewidths=1)
         
-        nx.draw_networkx_labels(st.session_state.graph, pos, font_size=8, ax=ax)
+        nx.draw_networkx_labels(self.graph, pos, font_size=8, ax=ax)
         
         ax.set_title("Réseau du Club de Karaté de Zachary", fontsize=16)
         ax.axis('off')
@@ -842,17 +1065,17 @@ class KarateApp:
         # Métriques
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("Nœuds", st.session_state.graph.number_of_nodes())
+            st.metric("Nœuds", self.graph.number_of_nodes())
         with col2:
-            st.metric("Arêtes", st.session_state.graph.number_of_edges())
+            st.metric("Arêtes", self.graph.number_of_edges())
         
         # Top centralités global
         st.write("**🎯 Top 3 - Centralité de Degré**")
-        degree_centrality = nx.degree_centrality(st.session_state.graph)
+        degree_centrality = nx.degree_centrality(self.graph)
         top_nodes = sorted(degree_centrality.items(), key=lambda x: x[1], reverse=True)[:3]
         
         for node, centrality in top_nodes:
-            group = st.session_state.graph.nodes[node].get('group', 'Non assigné')
+            group = self.graph.nodes[node].get('group', 'Non assigné')
             st.write(f"• Nœud {node} ({group}): `{centrality:.3f}`")
         
         st.write("---")
@@ -911,7 +1134,7 @@ class KarateApp:
             # Création de tous les DataFrames
             centrality_df = pd.DataFrame({
                 "Sommet": metrics["nodes"],
-                "Groupe": [st.session_state.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
+                "Groupe": [self.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
                 "Degré": [metrics["degree_centrality"][v] for v in metrics["nodes"]],
                 "Proximité": [metrics["closeness_dict"][v] for v in metrics["nodes"]],
                 "Intermédiarité": [metrics["betweenness_dict"][v] for v in metrics["nodes"]],
@@ -921,14 +1144,14 @@ class KarateApp:
             
             clustering_df = pd.DataFrame({
                 "Sommet": metrics["nodes"],
-                "Groupe": [st.session_state.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
+                "Groupe": [self.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
                 "Clustering": [metrics["clustering_dict"][v] for v in metrics["nodes"]],
                 "Degré": [metrics["degree_dict"][v] for v in metrics["nodes"]]
             })
             
             kcore_df = pd.DataFrame({
                 "Sommet": metrics["nodes"],
-                "Groupe": [st.session_state.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
+                "Groupe": [self.graph.nodes[node].get('group', 'Non assigné') for node in metrics["nodes"]],
                 "K-core": [metrics["core_numbers"][v] for v in metrics["nodes"]],
                 "Degré": [metrics["degree_dict"][v] for v in metrics["nodes"]]
             })
@@ -940,26 +1163,26 @@ class KarateApp:
             
             # Données des nœuds et arêtes
             nodes_data = []
-            for node in st.session_state.graph.nodes():
+            for node in self.graph.nodes():
                 nodes_data.append({
                     'Nœud': node,
-                    'Groupe': st.session_state.graph.nodes[node].get('group', 'Non assigné'),
-                    'Degré': st.session_state.graph.degree(node)
+                    'Groupe': self.graph.nodes[node].get('group', 'Non assigné'),
+                    'Degré': self.graph.degree(node)
                 })
             nodes_df = pd.DataFrame(nodes_data)
             
             edges_data = []
-            for edge in st.session_state.graph.edges():
+            for edge in self.graph.edges():
                 edges_data.append({'Source': edge[0], 'Cible': edge[1]})
             edges_df = pd.DataFrame(edges_data)
             
             # Matrice d'adjacence simplifiée (évite scipy)
-            nodes_sorted = sorted(st.session_state.graph.nodes())
+            nodes_sorted = sorted(self.graph.nodes())
             adj_data = []
             for i, node1 in enumerate(nodes_sorted):
                 row = {}
                 for j, node2 in enumerate(nodes_sorted):
-                    row[node2] = 1 if st.session_state.graph.has_edge(node1, node2) else 0
+                    row[node2] = 1 if self.graph.has_edge(node1, node2) else 0
                 adj_data.append(row)
             
             adj_df = pd.DataFrame(adj_data, index=nodes_sorted)
@@ -1022,11 +1245,11 @@ class KarateApp:
         report += "MÉTRIQUES GLOBALES:\n"
         report += f"- Nœuds: {metrics['ordre']}\n"
         report += f"- Arêtes: {metrics['taille']}\n"
-        report += f"- Densité: {nx.density(st.session_state.graph):.3f}\n"
+        report += f"- Densité: {nx.density(self.graph):.3f}\n"
         report += f"- Coefficient de clustering moyen: {metrics['coeff_moyen']:.3f}\n"
-        report += f"- Diamètre: {nx.diameter(st.session_state.graph) if nx.is_connected(st.session_state.graph) else 'Non connecté'}\n"
-        report += f"- Composantes connexes: {nx.number_connected_components(st.session_state.graph)}\n"
-        report += f"- Degré moyen: {np.mean([d for _, d in st.session_state.graph.degree()]):.2f}\n"
+        report += f"- Diamètre: {nx.diameter(self.graph) if nx.is_connected(self.graph) else 'Non connecté'}\n"
+        report += f"- Composantes connexes: {nx.number_connected_components(self.graph)}\n"
+        report += f"- Degré moyen: {np.mean([d for _, d in self.graph.degree()]):.2f}\n"
         report += f"- Plus grande clique: {metrics['max_clique']} (taille: {metrics['taille_max_clique']})\n"
         report += f"- K-core maximal: {metrics['k_core_max']}\n\n"
         
@@ -1064,7 +1287,7 @@ class KarateApp:
             top_3 = sorted(centrality_dict.items(), key=lambda x: x[1], reverse=True)[:3]
             report += f"{name}:\n"
             for node, value in top_3:
-                group = st.session_state.graph.nodes[node].get('group', 'Non assigné')
+                group = self.graph.nodes[node].get('group', 'Non assigné')
                 report += f"  • Nœud {node} ({group}): {value:.3f}\n"
             report += "\n"
         
