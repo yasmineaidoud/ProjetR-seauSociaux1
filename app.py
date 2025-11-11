@@ -1303,4 +1303,4 @@ class KarateApp:
 # Lancement
 if __name__ == "__main__":
     app = KarateApp()
-    app.run()
+    app.run() 
